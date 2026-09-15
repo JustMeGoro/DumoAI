@@ -22,8 +22,6 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # --- ZMĚNA: Přesné instrukce na rozdělení textu ---
 PRAVIDLA = "Odpovídej VÝHRADNĚ česky. ZAKÁZÁNO používat tabulky. TVŮJ VÝSTUP MUSÍ MÍT PŘESNĚ DVĚ ČÁSTI: 1. Nejprve napiš JEDNU údernou větu (shrnutí tvého postoje). 2. Poté VYNECH PRÁZDNÝ ŘÁDEK a pod ním detailně rozepiš své argumenty (max 2 odstavce)."
 
-PRAVIDLA = "Odpovídej VÝHRADNĚ česky. ZAKÁZÁNO používat tabulky. TVŮJ VÝSTUP MUSÍ MÍT PŘESNĚ DVĚ ČÁSTI: 1. Nejprve napiš JEDNU údernou větu (shrnutí tvého postoje). 2. Poté VYNECH PRÁZDNÝ ŘÁDEK a pod ním detailně rozepiš své argumenty (max 2 odstavce)."
-
 class MyClient(discord.Client):
     def __init__(self):
         super().__init__(intents=discord.Intents.default())
@@ -132,7 +130,7 @@ async def ukol_pridat(interaction: discord.Interaction, nazev: str, status: str,
     embed.add_field(name="Pro", value=prirazeno, inline=True)
     await interaction.followup.send(embed=embed)
 
-@client.tree.command(name="kanban", description="Zobrazí aktuální nástěnku úkolů ze Supabase.")
+@client.tree.command(name="kanban", description="Zobrazí grafickou Kanban nástěnku úkolů se všemi ID.")
 async def kanban(interaction: discord.Interaction):
     await interaction.response.defer()
     response = supabase.table("tasks").select("*").execute()
@@ -147,7 +145,8 @@ async def kanban(interaction: discord.Interaction):
     done_list = []
 
     for t in tasks:
-        line = f"• **{t['title']}** *({t['assignee']})* [ID: {t['id']}]"
+        # Pěkně formátovaný řádek s ID v hranatých závorkách a ztučnělým názvem
+        line = f"🆔 **`#{t['id']}`** | {t['title']} \n 👤 *{t['assignee']}*\n"
         if t['status'] == 'todo':
             todo_list.append(line)
         elif t['status'] == 'in_progress':
@@ -155,10 +154,30 @@ async def kanban(interaction: discord.Interaction):
         elif t['status'] == 'done':
             done_list.append(line)
 
-    embed = discord.Embed(title="📋 DuoDumo Studio - Kanban Nástěnka", color=0x3498db)
-    embed.add_field(name="📌 To-Do", value="\n".join(todo_list) if todo_list else "Prázdno", inline=False)
-    embed.add_field(name="⏳ In Progress", value="\n".join(in_progress_list) if in_progress_list else "Prázdno", inline=False)
-    embed.add_field(name="✅ Done", value="\n".join(done_list) if done_list else "Prázdno", inline=False)
+    # Vytvoření grafického Embedu s přehlednými sloupci
+    embed = discord.Embed(
+        title="📋 DuoDumo Studio — Vývojová Nástěnka (Kanban)", 
+        description="Přehled úkolů v reálném čase synchronizovaný se Supabase databází.",
+        color=0x9b59b6
+    )
+    
+    embed.add_field(
+        name="📌 To-Do (K řešení)", 
+        value="\n".join(todo_list) if todo_list else "*Žádné úkoly*", 
+        inline=False
+    )
+    embed.add_field(
+        name="⏳ In Progress (Pracuje se)", 
+        value="\n".join(in_progress_list) if in_progress_list else "*Žádné úkoly*", 
+        inline=False
+    )
+    embed.add_field(
+        name="✅ Done (Hotovo)", 
+        value="\n".join(done_list) if done_list else "*Žádné úkoly*", 
+        inline=False
+    )
+    
+    embed.set_footer(text="Pro změnu stavu použij příkaz /ukol_stav [id_ukolu] [novy_stav]")
     await interaction.followup.send(embed=embed)
 
 @client.tree.command(name="ukol_stav", description="Změní stav úkolu (např. na 'done' jako hotovo).")
@@ -170,7 +189,7 @@ async def kanban(interaction: discord.Interaction):
 async def ukol_stav(interaction: discord.Interaction, id_ukolu: int, novy_stav: str):
     await interaction.response.defer()
     supabase.table("tasks").update({"status": novy_stav}).eq("id", id_ukolu).execute()
-    await interaction.followup.send(f"🔄 Úkol s ID `{id_ukolu}` byl přesunut do stavu: **{novy_stav}**!")
+    await interaction.followup.send(f"🔄 Úkol s ID `#{id_ukolu}` byl úspěšně přesunut do stavu: **{novy_stav}**!")
 
 @client.tree.command(name="mvp", description="Oseká obří nápad na absolutní minimum (Minimum Viable Product).")
 async def mvp(interaction: discord.Interaction, napad: str):
