@@ -6,14 +6,22 @@ from duckduckgo_search import DDGS
 import os
 from flask import Flask
 from threading import Thread
+from supabase import create_client, Client
 
 # === KONFIGURACE ===
 DISCORD_TOKEN = "MTU0OTMxNjIyOTEzNzY5ODgzNg.GbwV-Z.vsPNab8u9EGNFMUNaHufz7KsHzrK0vuBJ76yhs"
 GROQ_API_KEY = "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"
 GUILD_ID = 1259045709659766874
 
+# === SUPABASE KONFIGURACE ===
+SUPABASE_URL = "https://ogzewuvlnqsbsegupntu.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9nemV3dXZsbnFzYnNlZ3VwbnR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk0NjEzNzcsImV4cCI6MjEwNTAzNzM3N30.1V8ZeIpqaVQTfGp5HJlKP280K5t7LJIAa9-vhgbEU78"
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
 
 # --- ZMĚNA: Přesné instrukce na rozdělení textu ---
+PRAVIDLA = "Odpovídej VÝHRADNĚ česky. ZAKÁZÁNO používat tabulky. TVŮJ VÝSTUP MUSÍ MÍT PŘESNĚ DVĚ ČÁSTI: 1. Nejprve napiš JEDNU údernou větu (shrnutí tvého postoje). 2. Poté VYNECH PRÁZDNÝ ŘÁDEK a pod ním detailně rozepiš své argumenty (max 2 odstavce)."
+
 PRAVIDLA = "Odpovídej VÝHRADNĚ česky. ZAKÁZÁNO používat tabulky. TVŮJ VÝSTUP MUSÍ MÍT PŘESNĚ DVĚ ČÁSTI: 1. Nejprve napiš JEDNU údernou větu (shrnutí tvého postoje). 2. Poté VYNECH PRÁZDNÝ ŘÁDEK a pod ním detailně rozepiš své argumenty (max 2 odstavce)."
 
 class MyClient(discord.Client):
@@ -95,22 +103,74 @@ def format_output(text: str) -> str:
 ])
 async def agent_command(interaction: discord.Interaction, jmeno: str, dotaz: str):
     await interaction.response.defer()
-    
-    # Vybereme správného agenta podle volby
     if jmeno == "moderator":
         selected = MODERATOR
     else:
         selected = next((a for a in DEBATERS if a["id"] == jmeno), DEBATERS[0])
     
     msg = await interaction.followup.send(f"💬 **{selected['name']}** přemýšlí nad tvým dotazem...", wait=True)
-    
     ans = await ask_agent(selected["system"], dotaz)
     
     embed = discord.Embed(description=format_output(ans), color=selected["color"])
     embed.set_author(name=selected["name"])
     embed.add_field(name="Dotaz", value=dotaz, inline=False)
-    
     await msg.edit(content=None, embed=embed)
+
+@client.tree.command(name="ukol_pridat", description="Přidá nový úkol do Supabase Kanbanu.")
+@app_commands.choices(status=[
+    app_commands.Choice(name="To-Do (K řešení)", value="todo"),
+    app_commands.Choice(name="In Progress (Pracuje se)", value="in_progress")
+])
+async def ukol_pridat(interaction: discord.Interaction, nazev: str, status: str, prirazeno: str = "Tým"):
+    await interaction.response.defer()
+    data = {"title": nazev, "status": status, "assignee": prirazeno}
+    supabase.table("tasks").insert(data).execute()
+    
+    embed = discord.Embed(title="✅ Úkol přidán do nástěnky", color=0x2ecc71)
+    embed.add_field(name="Název", value=nazev, inline=False)
+    embed.add_field(name="Stav", value=status, inline=True)
+    embed.add_field(name="Pro", value=prirazeno, inline=True)
+    await interaction.followup.send(embed=embed)
+
+@client.tree.command(name="kanban", description="Zobrazí aktuální nástěnku úkolů ze Supabase.")
+async def kanban(interaction: discord.Interaction):
+    await interaction.response.defer()
+    response = supabase.table("tasks").select("*").execute()
+    tasks = response.data
+    
+    if not tasks:
+        await interaction.followup.send("📭 Nástěnka je zatím prázdná! Žádné úkoly.")
+        return
+
+    todo_list = []
+    in_progress_list = []
+    done_list = []
+
+    for t in tasks:
+        line = f"• **{t['title']}** *({t['assignee']})* [ID: {t['id']}]"
+        if t['status'] == 'todo':
+            todo_list.append(line)
+        elif t['status'] == 'in_progress':
+            in_progress_list.append(line)
+        elif t['status'] == 'done':
+            done_list.append(line)
+
+    embed = discord.Embed(title="📋 DuoDumo Studio - Kanban Nástěnka", color=0x3498db)
+    embed.add_field(name="📌 To-Do", value="\n".join(todo_list) if todo_list else "Prázdno", inline=False)
+    embed.add_field(name="⏳ In Progress", value="\n".join(in_progress_list) if in_progress_list else "Prázdno", inline=False)
+    embed.add_field(name="✅ Done", value="\n".join(done_list) if done_list else "Prázdno", inline=False)
+    await interaction.followup.send(embed=embed)
+
+@client.tree.command(name="ukol_stav", description="Změní stav úkolu (např. na 'done' jako hotovo).")
+@app_commands.choices(novy_stav=[
+    app_commands.Choice(name="To-Do", value="todo"),
+    app_commands.Choice(name="In Progress", value="in_progress"),
+    app_commands.Choice(name="Done (Hotovo)", value="done")
+])
+async def ukol_stav(interaction: discord.Interaction, id_ukolu: int, novy_stav: str):
+    await interaction.response.defer()
+    supabase.table("tasks").update({"status": novy_stav}).eq("id", id_ukolu).execute()
+    await interaction.followup.send(f"🔄 Úkol s ID `{id_ukolu}` byl přesunut do stavu: **{novy_stav}**!")
 
 @client.tree.command(name="mvp", description="Oseká obří nápad na absolutní minimum (Minimum Viable Product).")
 async def mvp(interaction: discord.Interaction, napad: str):
