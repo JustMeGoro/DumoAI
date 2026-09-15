@@ -28,14 +28,13 @@ class MyClient(discord.Client):
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self):
-        my_guild = discord.Object(id=GUILD_ID)
-        # Odmazání staré cache pro jistotu:
-        self.tree.clear_commands(guild=my_guild)
-        await self.tree.sync(guild=my_guild)
-        
-        self.tree.copy_global_to(guild=my_guild)
-        await self.tree.sync(guild=my_guild)
-        print("✅ Příkazy promazány a zsynchronizovány!")
+        try:
+            my_guild = discord.Object(id=GUILD_ID)
+            self.tree.copy_global_to(guild=my_guild)
+            await self.tree.sync(guild=my_guild)
+            print("✅ Slash příkazy byly úspěšně zsynchronizovány pro server!")
+        except Exception as e:
+            print(f"❌ Chyba při synchronizaci příkazů: {e}")
 
 client = MyClient()
 groq_client = AsyncGroq(api_key=GROQ_API_KEY)
@@ -45,7 +44,7 @@ DEBATERS = [
     {"id": "designer", "name": "🎮 Herní Designér", "color": 0x3498db, "system": f"Jsi hlavní designér. Vyvíjíme hry v Robloxu. Zhodnoť nápad, hledej způsoby jak ho udělat zábavný. {PRAVIDLA}"},
     {"id": "tech", "name": "⚙️ Tech & Scope Lead", "color": 0xe74c3c, "system": f"Jsi pesimistický hlavní programátor v Luau. Jsme dvoučlenné nezávislé Roblox studio. Zkritizuj nápady z hlediska časové a technické náročnosti. Hledej bugy. {PRAVIDLA}"},
     {"id": "marketing", "name": "📈 Marketing & Robux Expert", "color": 0xf1c40f, "system": f"Jsi expert na Roblox algoritmus, retenci hráčů a monetizaci. Řešíš, jestli má hra virální potenciál (TikTok) a jak přirozeně prodávat Gamepassy. {PRAVIDLA}"},
-    {"id": "player", "name": "🕹️ Zkušený Roblox Hráč", "color": 0x9b59b6, "system": f"Jsi ostřílený hráč Robloxu. Hodnotíš nápady čistě z pohledu hratelnosti (gameplaye), ovládání a zábavnosti. Porovnávej to s tím, co běžně na Robloxu funguje a jestli by tě to bhavilo hrát s kamarády. {PRAVIDLA}"}
+    {"id": "player", "name": "🕹️ Zkušený Roblox Hráč", "color": 0x9b59b6, "system": f"Jsi ostřílený hráč Robloxu. Hodnotíš nápady čistě z pohledu hratelnosti (gameplaye), ovládání a zábavnosti. Porovnávej to s tím, co běžně na Robloxu funguje a jestli by tě to bavilo hrát s kamarády. {PRAVIDLA}"}
 ]
 
 MODERATOR = {
@@ -153,11 +152,9 @@ async def kanban_seznam(interaction: discord.Interaction):
 ])
 async def ukol_pridat(interaction: discord.Interaction, projekt: str, nazev: str, status: str, prirazeno: str = "Tým"):
     await interaction.response.defer()
-    
-    # Najdeme ID projektu podle názvu
     proj_res = supabase.table("projects").select("id").eq("name", projekt).execute()
     if not proj_res.data:
-        await interaction.followup.send(f"❌ Projekt '{projekt}' nebyl nalezen. Nejdřív ho vytvoř pomocí `/kanban_vytvor`.")
+        await interaction.followup.send(f"❌ Projekt '{projekt}' nebyl nalezen.")
         return
     
     project_id = proj_res.data[0]["id"]
@@ -174,8 +171,6 @@ async def ukol_pridat(interaction: discord.Interaction, projekt: str, nazev: str
 @app_commands.autocomplete(projekt=project_autocomplete)
 async def kanban(interaction: discord.Interaction, projekt: str):
     await interaction.response.defer()
-    
-    # Najdeme projekt
     proj_res = supabase.table("projects").select("id").eq("name", projekt).execute()
     if not proj_res.data:
         await interaction.followup.send(f"❌ Projekt '{projekt}' nebyl nalezen.")
@@ -190,7 +185,6 @@ async def kanban(interaction: discord.Interaction, projekt: str):
         return
 
     todo_list, in_progress_list, done_list = [], [], []
-
     for t in tasks:
         line = f"🆔 **`#{t['id']}`** | {t['title']} \n 👤 *{t['assignee']}*\n"
         if t['status'] == 'todo':
@@ -200,15 +194,10 @@ async def kanban(interaction: discord.Interaction, projekt: str):
         elif t['status'] == 'done':
             done_list.append(line)
 
-    embed = discord.Embed(
-        title=f"📋 DuoDumo Studio — {projekt}", 
-        description=f"Vývojová nástěnka pro projekt {projekt}.",
-        color=0x9b59b6
-    )
+    embed = discord.Embed(title=f"📋 DuoDumo Studio — {projekt}", description=f"Vývojová nástěnka pro projekt {projekt}.", color=0x9b59b6)
     embed.add_field(name="📌 To-Do", value="\n".join(todo_list) if todo_list else "*Žádné úkoly*", inline=False)
     embed.add_field(name="⏳ In Progress", value="\n".join(in_progress_list) if in_progress_list else "*Žádné úkoly*", inline=False)
     embed.add_field(name="✅ Done", value="\n".join(done_list) if done_list else "*Žádné úkoly*", inline=False)
-    
     embed.set_footer(text="Pro změnu stavu použij příkaz /ukol_stav [id_ukolu] [novy_stav]")
     await interaction.followup.send(embed=embed)
 
@@ -222,6 +211,56 @@ async def ukol_stav(interaction: discord.Interaction, id_ukolu: int, novy_stav: 
     await interaction.response.defer()
     supabase.table("tasks").update({"status": novy_stav}).eq("id", id_ukolu).execute()
     await interaction.followup.send(f"🔄 Úkol s ID `#{id_ukolu}` byl úspěšně přesunut do stavu: **{novy_stav}**!")
+
+@client.tree.command(name="meeting", description="Zahájí poradu AI agentů (s možností zásahu člověka).")
+async def meeting(interaction: discord.Interaction, napad: str):
+    await interaction.response.send_message(f"🚀 **Zahajuji poradu nad nápadem:** {napad}\n*Zakládám vlákno a volám agenty...*", ephemeral=False)
+    msg = await interaction.original_response()
+    thread = await interaction.channel.create_thread(name=f"Porada: {napad[:15]}...", message=msg, auto_archive_duration=60)
+    
+    transcript = f"Téma porady: {napad}\n\n"
+    is_first_message = True 
+    
+    for kolo in range(2):
+        await thread.send(f"## 🔄 Začíná {kolo + 1}. kolo debaty")
+        for agent in DEBATERS:
+            async with thread.typing():
+                if is_first_message:
+                    await asyncio.sleep(2)
+                    is_first_message = False
+                else:
+                    await asyncio.sleep(6)
+                ai_response = await ask_agent(agent["system"], transcript)
+                cisty_text = ai_response.replace("###", "").strip()
+                transcript += f"V {kolo + 1}. kole {agent['name']} řekl: {cisty_text}\n\n"
+                embed = discord.Embed(description=format_output(ai_response), color=agent["color"])
+                embed.set_author(name=agent["name"])
+                await thread.send(embed=embed)
+            await asyncio.sleep(3)
+
+        if kolo == 0:
+            await thread.send("👤 **Tvůj tah!** Napiš sem svůj komentář nebo nový nápad. *(Pro přeskočení napiš `dál`)*.\n⏳ *Máš 5 minut.*")
+            def check(m):
+                return m.channel == thread and not m.author.bot
+            try:
+                user_msg = await client.wait_for('message', check=check, timeout=300.0) 
+                if user_msg.content.lower().strip() != 'dál':
+                    transcript += f"Lidský šéf zasahuje do debaty: {user_msg.content}\n\n"
+                    await thread.send("✅ *Komentář zaznamenán...*")
+                else:
+                    await thread.send("▶️ *Pokračujeme rovnou do dalšího kola.*")
+            except asyncio.TimeoutError:
+                await thread.send("⏳ *Čas vypršel, pokračujeme automaticky.*")
+
+    await thread.send(f"## 📋 Závěrečné slovo Moderátora")
+    async with thread.typing():
+        await asyncio.sleep(6)
+        ai_response = await ask_agent(MODERATOR["system"], transcript)
+        embed = discord.Embed(description=format_output(ai_response), color=MODERATOR["color"])
+        embed.set_author(name=MODERATOR["name"])
+        await thread.send(embed=embed)
+    
+    await interaction.channel.send(f"✅ Porada u konce! Závěr najdete ve vlákně: {thread.mention}")
 
 @client.tree.command(name="mvp", description="Oseká obří nápad na absolutní minimum.")
 async def mvp(interaction: discord.Interaction, napad: str):
