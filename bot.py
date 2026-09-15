@@ -28,13 +28,14 @@ class MyClient(discord.Client):
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self):
-        try:
-            my_guild = discord.Object(id=GUILD_ID)
-            self.tree.copy_global_to(guild=my_guild)
-            await self.tree.sync(guild=my_guild)
-            print("✅ Slash příkazy byly úspěšně zsynchronizovány pro server!")
-        except Exception as e:
-            print(f"❌ Chyba při synchronizaci příkazů: {e}")
+        my_guild = discord.Object(id=GUILD_ID)
+        # Odmazání staré cache pro jistotu:
+        self.tree.clear_commands(guild=my_guild)
+        await self.tree.sync(guild=my_guild)
+        
+        self.tree.copy_global_to(guild=my_guild)
+        await self.tree.sync(guild=my_guild)
+        print("✅ Příkazy promazány a zsynchronizovány!")
 
 client = MyClient()
 groq_client = AsyncGroq(api_key=GROQ_API_KEY)
