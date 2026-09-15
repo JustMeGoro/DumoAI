@@ -84,6 +84,34 @@ def format_output(text: str) -> str:
     return f"### {nadpis.strip()}"
 
 # === DISCORD PŘÍKAZY ===
+
+@client.tree.command(name="agent", description="Odešle dotaz vybranému členovi týmu (designer, tech, marketing, player, moderator).")
+@app_commands.choices(jmeno=[
+    app_commands.Choice(name="🎮 Herní Designér", value="designer"),
+    app_commands.Choice(name="⚙️ Tech & Scope Lead", value="tech"),
+    app_commands.Choice(name="📈 Marketing & Robux Expert", value="marketing"),
+    app_commands.Choice(name="🕹️ Zkušený Roblox Hráč", value="player"),
+    app_commands.Choice(name="📋 Moderátor", value="moderator")
+])
+async def agent_command(interaction: discord.Interaction, jmeno: str, dotaz: str):
+    await interaction.response.defer()
+    
+    # Vybereme správného agenta podle volby
+    if jmeno == "moderator":
+        selected = MODERATOR
+    else:
+        selected = next((a for a in DEBATERS if a["id"] == jmeno), DEBATERS[0])
+    
+    msg = await interaction.followup.send(f"💬 **{selected['name']}** přemýšlí nad tvým dotazem...", wait=True)
+    
+    ans = await ask_agent(selected["system"], dotaz)
+    
+    embed = discord.Embed(description=format_output(ans), color=selected["color"])
+    embed.set_author(name=selected["name"])
+    embed.add_field(name="Dotaz", value=dotaz, inline=False)
+    
+    await msg.edit(content=None, embed=embed)
+
 @client.tree.command(name="mvp", description="Oseká obří nápad na absolutní minimum (Minimum Viable Product).")
 async def mvp(interaction: discord.Interaction, napad: str):
     await interaction.response.defer()
@@ -217,6 +245,5 @@ def keep_alive():
     t = Thread(target=run)
     t.start()
 
-# Spustíme falešný web na pozadí a hned po něm Discord bota
 keep_alive()
 client.run(DISCORD_TOKEN)
